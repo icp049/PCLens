@@ -134,8 +134,12 @@ def update_plot(*args):
 
     filtered = timeline[timeline['ActivePCs'] >= required_count].copy()
     ax.clear()
-
-    all_dates = pd.date_range(start='2025-02-01', end='2025-02-28').date
+    
+    
+    month_start = df['Login Time'].min().replace(day=1)
+    month_end = (month_start + pd.offsets.MonthBegin(1))
+    all_dates = pd.date_range(start=month_start, end=month_end - pd.Timedelta(days=1)).date
+    # df = df[(df['Login Time'] >= '2025-02-01') & (df['Login Time'] < '2025-03-01')].copy() // i used tgis for only one month
 
     if filtered.empty:
         ax.set_title(f"[{site}] No overlaps with ≥{pct_required}% active PCs", fontsize=14)
@@ -249,7 +253,9 @@ def load_and_initialize():
         df['Logout Time'] = pd.to_datetime(df['Logout Time'], format=dt_format, errors='coerce')
         df['Resource'] = df['Resource'].astype(str).str.strip()
         df['Site'] = df['Site'].astype(str).str.strip()
-        df = df[(df['Login Time'] >= '2025-02-01') & (df['Login Time'] < '2025-03-01')].copy()
+        month_start = df['Login Time'].min().replace(day=1)
+        month_end = (month_start + pd.offsets.MonthBegin(1))
+        df = df[(df['Login Time'] >= month_start) & (df['Login Time'] < month_end)].copy()
 
         start = datetime(2025, 2, 1)
         end = datetime(2025, 3, 1)
