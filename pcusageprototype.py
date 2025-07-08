@@ -6,50 +6,54 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from datetime import datetime
 from collections import defaultdict
+import customtkinter as ctk
 
 # Global state
 df = None
 site_timelines = {}
 
 def export_plot_data():
-    if not site_timelines or not month_var.get():
-        status_label.config(text="⚠ Cannot export — no data or month selected.")
+    if not site_timelines:
+        status_label.config(text="⚠ Cannot export — no data loaded.")
         return
 
     export_rows = []
     thresholds = list(range(10, 101, 10))
 
-   
-    selected_month = pd.Period(month_var.get()).to_timestamp()
-    month_start = selected_month.replace(day=1)
-    month_end = (month_start + pd.offsets.MonthBegin(1))
+    # Get all unique months from the dataset
+    all_months = sorted(df['Login Time'].dt.to_period('M').dropna().unique())
 
-    for site, (timeline, num_pcs) in site_timelines.items():
-        # Filter timeline and logins by selected month
-        filtered_timeline = timeline[(timeline.index >= month_start) & (timeline.index < month_end)]
-        all_logins = df[(df['Site'] == site) &
-                        (df['Login Time'] >= month_start) &
-                        (df['Login Time'] < month_end)]
-        unique_pcs = sorted(all_logins['Resource'].unique())
+    for month in all_months:
+        month_start = month.to_timestamp()
+        month_end = (month_start + pd.offsets.MonthBegin(1))
+        month_str = str(month)
 
-        for pct in thresholds:
-            required_count = int(np.ceil((pct / 100) * num_pcs)) or 1
-            filtered_minutes = filtered_timeline[filtered_timeline['ActivePCs'] >= required_count].index
+        for site, (timeline, num_pcs) in site_timelines.items():
+            # Filter per month
+            filtered_timeline = timeline[(timeline.index >= month_start) & (timeline.index < month_end)]
+            all_logins = df[(df['Site'] == site) &
+                            (df['Login Time'] >= month_start) &
+                            (df['Login Time'] < month_end)]
+            unique_pcs = sorted(all_logins['Resource'].unique())
 
-            for minute in filtered_minutes:
-                export_rows.append({
-                    'Branch': site,
-                    'Threshold (%)': pct,
-                    'Timestamp': minute,
-                    'PCs Used': f"{required_count} of {len(unique_pcs)}"
-                })
+            for pct in thresholds:
+                required_count = int(np.ceil((pct / 100) * num_pcs)) or 1
+                filtered_minutes = filtered_timeline[filtered_timeline['ActivePCs'] >= required_count].index
+
+                for minute in filtered_minutes:
+                    export_rows.append({
+                        'Branch': site,
+                        'Threshold (%)': pct,
+                        'Timestamp': minute,
+                        'PCs Used': f"{required_count} of {len(unique_pcs)}",
+                        'Month': month_str
+                    })
 
     if not export_rows:
-        status_label.config(text="⚠ No qualifying data to export for this month.")
+        status_label.config(text="⚠ No data to export.")
         return
 
     df_export = pd.DataFrame(export_rows)
-    df_export['Month'] = df_export['Timestamp'].dt.to_period('M').astype(str)  # Optional: for Power BI
 
     export_path = filedialog.asksaveasfilename(
         defaultextension=".xlsx",
@@ -59,16 +63,16 @@ def export_plot_data():
 
     if export_path:
         df_export.to_excel(export_path, index=False)
-        status_label.config(text=f"📤 Exported plot data for {month_var.get()} to: {export_path}")
+        status_label.config(text=f"📤 Exported all-month plot data to: {export_path}")
     else:
         status_label.config(text="❌ Export canceled.")
+
 
 
 
 def update_plot():
     site = site_var.get()
     month_str = month_var.get()
-
     if not site or site not in site_timelines or not month_str:
         return
 
@@ -88,8 +92,6 @@ def update_plot():
 
     if filtered.empty:
         ax.set_title(f"[{site}] No overlaps with ≥{pct_required}% active PCs", fontsize=14)
-        ax.set_xlabel("Time of Day (Hour)")
-        ax.set_ylabel("Date")
         ax.set_xticks(np.arange(0, 24, 1))
         ax.set_xticklabels([f"{h:02}:00" for h in range(24)], rotation=45)
         ax.set_ylim([all_dates[-1], all_dates[0]])
@@ -98,8 +100,8 @@ def update_plot():
         ax.grid(True, linestyle='--', alpha=0.3)
         fig.tight_layout()
         plot_canvas.draw()
-        status_label.config(text="⚠ No data to show")
-        status_detail_label.config(text="")
+        status_label.configure(text="⚠ No data to show")
+        status_detail_label.configure(text="")
         return
 
     filtered['Date'] = filtered.index.date
@@ -133,10 +135,7 @@ def update_plot():
                 if overlaps:
                     pc_contributions[pc].update(overlaps)
 
-    pc_contribution_counts = {
-        pc: len(minutes) for pc, minutes in pc_contributions.items()
-    }
-
+    pc_contribution_counts = {pc: len(minutes) for pc, minutes in pc_contributions.items()}
     sorted_pcs = sorted(pc_contribution_counts.items(), key=lambda x: x[1], reverse=True)
     active_pc_names = [pc for pc, _ in sorted_pcs[:required_count]]
 
@@ -165,20 +164,26 @@ def update_plot():
     time_block = "\n\n🕒 Qualified Time Ranges (≥{}% PCs active):\n".format(pct_required)
     time_block += "\n".join(range_lines)
 
-    status_detail_label.config(
-        text=f"🖥 {len(active_pc_names)}/{len(unique_pcs)} PCs contributed during qualified time blocks (≥{pct_required}%)\n" +
-             time_block
+    status_detail_label.configure(
+        text=f"🖥 {len(active_pc_names)}/{len(unique_pcs)} PCs contributed during qualified time blocks (≥{pct_required}%)\n" + time_block
     )
-    status_label.config(text="✔ Plot updated.")
+    status_label.configure(text="✔ Plot updated.")
+
 
 
 def load_and_initialize():
-    loading_win = tk.Toplevel(root)
+    loading_win = ctk.CTkToplevel(root)
     loading_win.title("Loading...")
     loading_win.geometry("300x100")
     loading_win.transient(root)
     loading_win.grab_set()
-    tk.Label(loading_win, text="Loading data, please wait...", padx=20, pady=20).pack()
+    
+    label = ctk.CTkLabel(loading_win, text="Loading data, please wait...")
+    label.pack(pady=10)
+    
+    progress = ctk.CTkProgressBar(loading_win, mode="indeterminate")
+    progress.pack(fill="x", padx=20, pady=(0, 20))
+    progress.start()
     loading_win.update()
 
     file_path = filedialog.askopenfilename(
@@ -188,8 +193,7 @@ def load_and_initialize():
 
     if not file_path:
         loading_win.destroy()
-        root.destroy()
-        exit()
+        return
 
     try:
         global df
@@ -242,27 +246,16 @@ def load_and_initialize():
         status_label.config(text="✔ File loaded. Ready to visualize data.")
 
 # ---------------- TKINTER UI ----------------
-root = tk.Tk()
+root = ctk.CTk()
 root.title("PC Activity Visualizer (Monthly)")
 root.state('zoomed')
 root.minsize(1024, 768)
 
-main_canvas = tk.Canvas(root)
-main_scrollbar = tk.Scrollbar(root, orient="vertical", command=main_canvas.yview)
-scrollable_frame = tk.Frame(main_canvas)
+scrollable_frame = ctk.CTkScrollableFrame(root)
+scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-scrollable_frame.bind(
-    "<Configure>",
-    lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
-)
-
-main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-main_canvas.configure(yscrollcommand=main_scrollbar.set)
-main_canvas.pack(side="left", fill="both", expand=True)
-main_scrollbar.pack(side="right", fill="y")
-
-plot_frame = tk.Frame(scrollable_frame, width=1200, height=600)
-plot_frame.pack(fill=tk.X, padx=10)
+plot_frame = ctk.CTkFrame(scrollable_frame, width=1200, height=600)
+plot_frame.pack(fill=ctk.X, padx=10)
 plot_frame.pack_propagate(False)
 
 fig, ax = plt.subplots(figsize=(12, 6))
@@ -275,34 +268,43 @@ ax.clear()
 ax.axis('off')
 plot_canvas.draw()
 
-status_label = tk.Label(scrollable_frame, text="📂 Please load an Excel file to begin.", fg="gray", anchor="w")
-status_label.pack(fill=tk.X, padx=10, pady=(5, 10))
+status_label = ctk.CTkLabel(scrollable_frame, text="📂 Please load an Excel file to begin.", text_color="gray")
+status_label.pack(fill=ctk.X, padx=10, pady=(5, 10))
 
-status_detail_label = tk.Label(scrollable_frame, text="", fg="black", anchor="w", justify="left")
-status_detail_label.pack(fill=tk.X, padx=10, pady=(0, 10))
+detail_container = ctk.CTkFrame(scrollable_frame, height=150)
+detail_container.pack(fill=ctk.X, padx=10, pady=(0, 10))
+detail_container.pack_propagate(False)
 
-frame = tk.Frame(scrollable_frame)
-frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
-frame.columnconfigure(0, weight=1)
-frame.columnconfigure(1, weight=1)
+status_detail_scroll = ctk.CTkScrollableFrame(detail_container)
+status_detail_scroll.pack(fill=ctk.BOTH, expand=True)
 
-left_frame = tk.Frame(frame)
+status_detail_label = ctk.CTkLabel(status_detail_scroll, text="", text_color="black", justify="left", anchor="w")
+status_detail_label.pack(fill=ctk.X, padx=10, pady=10)
+
+frame = ctk.CTkFrame(scrollable_frame)
+frame.pack(side=ctk.TOP, fill=ctk.X, padx=10, pady=10)
+frame.grid_columnconfigure(0, weight=1)
+frame.grid_columnconfigure(1, weight=1)
+
+
+left_frame = ctk.CTkFrame(frame)
 left_frame.grid(row=0, column=0, sticky='w')
 
-tk.Label(left_frame, text="Select Month:").pack(side=tk.LEFT, padx=(0, 5))
-month_var = tk.StringVar()
+ctk.CTkLabel(left_frame, text="Select Month:").pack(side=ctk.LEFT, padx=(0, 5))
+month_var = ctk.StringVar()
 month_dropdown = ttk.Combobox(left_frame, textvariable=month_var, state='readonly')
-month_dropdown.pack(side=tk.LEFT)
+month_dropdown.pack(side=ctk.LEFT)
 
-tk.Label(left_frame, text="   Select Branch:").pack(side=tk.LEFT, padx=(10, 5))
-site_var = tk.StringVar()
+ctk.CTkLabel(left_frame, text="   Select Branch:").pack(side=ctk.LEFT, padx=(10, 5))
+site_var = ctk.StringVar()
 site_dropdown = ttk.Combobox(left_frame, textvariable=site_var, state='readonly')
-site_dropdown.pack(side=tk.LEFT)
+site_dropdown.pack(side=ctk.LEFT)
 
-apply_btn = tk.Button(frame, text="✅ Apply", command=update_plot)
+
+apply_btn = ctk.CTkButton(frame, text="✅ Apply", command=update_plot)
 apply_btn.grid(row=0, column=2, padx=(20, 0), sticky='e')
 
-export_btn = tk.Button(frame, text="📤 Export Contribution Summary to Excel", command=export_plot_data)
+export_btn = ctk.CTkButton(frame, text="📤 Export Contribution Summary to Excel", command=export_plot_data)
 export_btn.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
 percent_var = tk.IntVar()
@@ -320,5 +322,7 @@ percent_slider = tk.Scale(
 percent_slider.set(100)
 percent_slider.grid(row=0, column=1, sticky='e', padx=(20, 0))
 
-root.after(100, load_and_initialize)
+load_btn = ctk.CTkButton(frame, text="📂 Load Excel File", command=load_and_initialize)
+load_btn.grid(row=1, column=2, padx=(20, 0), sticky='e')
+
 root.mainloop()
