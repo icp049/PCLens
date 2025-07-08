@@ -338,7 +338,7 @@ detail_container.pack_propagate(False)
 status_detail_scroll = ctk.CTkScrollableFrame(detail_container)
 status_detail_scroll.pack(fill=ctk.BOTH, expand=True)
 
-status_detail_label = ctk.CTkLabel(status_detail_scroll, text="", text_color="black", justify="left", anchor="w")
+status_detail_label = ctk.CTkLabel(status_detail_scroll, text="", text_color="white", justify="left", anchor="w")
 status_detail_label.pack(fill=ctk.X, padx=10, pady=10)
 
 frame = ctk.CTkFrame(scrollable_frame)
