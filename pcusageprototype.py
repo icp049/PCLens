@@ -180,31 +180,63 @@ def load_and_initialize():
     )
 
     if not file_path:
+        reset_ui()
         return  # Cancelled
+
+    cancelled = threading.Event()  # shared flag to cancel loading
 
     # Create loading window before thread starts
     loading_win = ctk.CTkToplevel(root)
     loading_win.title("Loading...")
-    loading_win.geometry("300x100")
+    loading_win.geometry("300x140")
     loading_win.transient(root)
     loading_win.grab_set()
 
+    def handle_cancel():
+        cancelled.set()
+        loading_win.destroy()
+        reset_ui()
+
+    loading_win.protocol("WM_DELETE_WINDOW", handle_cancel)  # Close window
+
     label = ctk.CTkLabel(loading_win, text="Processing Data... 0%")
-    label.pack(pady=10)
+    label.pack(pady=(10, 5))
 
     progress = ctk.CTkProgressBar(loading_win, mode="determinate")
-    progress.pack(fill="x", padx=20, pady=(0, 20))
+    progress.pack(fill="x", padx=20, pady=(0, 10))
     progress.set(0)
+
+    cancel_btn = ctk.CTkButton(loading_win, text="❌ Cancel", command=handle_cancel)
+    cancel_btn.pack(pady=(0, 10))
 
     def do_load():
         try:
-            load_data(file_path, progress, label)
+            load_data(file_path, progress, label, cancelled)
+        except Exception as e:
+            root.after(0, lambda: status_label.configure(text=f"❌ Failed to load: {e}"))
+            root.after(0, reset_ui)
         finally:
-            loading_win.destroy()
+            if loading_win.winfo_exists():
+                root.after(0, loading_win.destroy)
 
     threading.Thread(target=do_load, daemon=True).start()
     
-def load_data(file_path, progress_widget, label_widget):
+def reset_ui():
+    global df, site_timelines
+    df = None
+    site_timelines.clear()
+    status_label.configure(text="📂 Please load an Excel file to begin.")
+    month_dropdown.configure(values=[])
+    site_dropdown.configure(values=[])
+    month_var.set("")
+    site_var.set("")
+    status_detail_label.configure(text="")
+    ax.clear()
+    ax.axis('off')
+    plot_canvas.draw()
+
+    
+def load_data(file_path, progress_widget, label_widget, cancelled):
     global df, site_timelines
 
     df = pd.read_excel(file_path)
@@ -234,6 +266,9 @@ def load_data(file_path, progress_widget, label_widget):
     processed_rows = 0
 
     for site in df['Site'].unique():
+        if cancelled.is_set():
+           return  # Exit early if user cancelled
+        
         site_df = df[df['Site'] == site]
         pcs = sorted(site_df['Resource'].unique())
         num_pcs = len(pcs)
@@ -242,6 +277,8 @@ def load_data(file_path, progress_widget, label_widget):
         timeline['ActivePCs'] = 0
 
         for _, row in site_df.iterrows():
+            if cancelled.is_set():
+              return 
             login, logout = row['Login Time'], row['Logout Time']
             if pd.notna(login) and pd.notna(logout):
                 active_minutes = pd.date_range(start=login, end=logout, freq='min')
@@ -331,19 +368,28 @@ export_btn = ctk.CTkButton(frame, text="📤 Export for PowerBI", command=export
 export_btn.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
 percent_var = tk.IntVar()
-percent_slider = tk.Scale(
-    frame,
+slider_frame = ctk.CTkFrame(frame)
+slider_frame.grid(row=0, column=1, padx=(20, 0), sticky='e')
+
+percent_slider = ctk.CTkSlider(
+    slider_frame,
     from_=10,
     to=100,
-    orient=tk.HORIZONTAL,
-    label="Min % of PCs Active",
+    number_of_steps=9,
     variable=percent_var,
-    resolution=10,
-    tickinterval=10,
-    length=400
+    command=lambda val: percent_var.set(int(float(val)))
 )
 percent_slider.set(100)
-percent_slider.grid(row=0, column=1, sticky='e', padx=(20, 0))
+percent_slider.pack(fill='x')
+
+tick_frame = ctk.CTkFrame(slider_frame)
+tick_frame.pack(fill='x', pady=(2, 0))
+
+tick_frame.grid_columnconfigure(tuple(range(10)), weight=1)
+
+for idx, i in enumerate(range(10, 101, 10)):
+    lbl = ctk.CTkLabel(tick_frame, text=str(i), text_color="white", font=ctk.CTkFont(size=10))
+    lbl.grid(row=0, column=idx, sticky='n')
 
 
 
