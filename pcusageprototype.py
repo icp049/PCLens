@@ -180,7 +180,6 @@ def load_and_initialize():
     )
 
     if not file_path:
-        reset_ui()
         return  # Cancelled
 
     cancelled = threading.Event()  # shared flag to cancel loading
@@ -211,6 +210,7 @@ def load_and_initialize():
 
     def do_load():
         try:
+            reset_ui() 
             load_data(file_path, progress, label, cancelled)
         except Exception as e:
             root.after(0, lambda: status_label.configure(text=f"❌ Failed to load: {e}"))
