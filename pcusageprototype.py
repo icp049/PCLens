@@ -21,53 +21,114 @@ def export_plot_data():
 
     export_rows = []
     thresholds = list(range(10, 101, 10))
-
-    # Get all unique months from the dataset
     all_months = sorted(df['Login Time'].dt.to_period('M').dropna().unique())
 
-    for month in all_months:
-        month_start = month.to_timestamp()
-        month_end = (month_start + pd.offsets.MonthBegin(1))
-        month_str = str(month)
-
-        for site, (timeline, num_pcs) in site_timelines.items():
-            # Filter per month
-            filtered_timeline = timeline[(timeline.index >= month_start) & (timeline.index < month_end)]
-            all_logins = df[(df['Site'] == site) &
-                            (df['Login Time'] >= month_start) &
-                            (df['Login Time'] < month_end)]
-            unique_pcs = sorted(all_logins['Resource'].unique())
-
-            for pct in thresholds:
-                required_count = int(np.ceil((pct / 100) * num_pcs)) or 1
-                filtered_minutes = filtered_timeline[filtered_timeline['ActivePCs'] >= required_count].index
-
-                for minute in filtered_minutes:
-                    export_rows.append({
-                        'Branch': site,
-                        'Threshold (%)': pct,
-                        'Timestamp': minute,
-                        'PCs Used': f"{required_count} of {len(unique_pcs)}",
-                        'Month': month_str
-                    })
-
-    if not export_rows:
-        status_label.config(text="⚠ No data to export.")
-        return
-
-    df_export = pd.DataFrame(export_rows)
-
+    # ✅ Prompt file path only once here
     export_path = filedialog.asksaveasfilename(
         defaultextension=".xlsx",
         filetypes=[("Excel files", "*.xlsx")],
         title="Save Threshold Plot Data"
     )
 
-    if export_path:
-        df_export.to_excel(export_path, index=False)
-        status_label.config(text=f"📤 Exported all-month plot data to: {export_path}")
-    else:
-        status_label.config(text="❌ Export canceled.")
+    if not export_path:
+        status_label.configure(text="❌ Export canceled.")
+        return
+
+    # Set up export progress window
+    export_win = ctk.CTkToplevel(root)
+    export_win.title("Exporting...")
+    export_win.geometry("300x140")
+    export_win.transient(root)
+    export_win.grab_set()
+
+    cancel_flag = threading.Event()
+
+    label = ctk.CTkLabel(export_win, text="Exporting... 0%")
+    label.pack(pady=(10, 5))
+
+    progress = ctk.CTkProgressBar(export_win, mode="determinate")
+    progress.pack(fill="x", padx=20, pady=(0, 10))
+    progress.set(0)
+
+    def handle_cancel():
+        cancel_flag.set()
+        export_win.destroy()
+        status_label.configure(text="❌ Export canceled.")
+
+    cancel_btn = ctk.CTkButton(export_win, text="❌ Cancel", command=handle_cancel)
+    cancel_btn.pack(pady=(0, 10))
+
+    def do_export():
+        try:
+            # First pass to count total minutes to export
+            total_minutes = 0
+            for month in all_months:
+                month_start = month.to_timestamp()
+                month_end = (month_start + pd.offsets.MonthBegin(1))
+                for site, (timeline, num_pcs) in site_timelines.items():
+                    filtered_timeline = timeline[(timeline.index >= month_start) & (timeline.index < month_end)]
+                    for pct in thresholds:
+                        required_count = int(np.ceil((pct / 100) * num_pcs)) or 1
+                        total_minutes += len(filtered_timeline[filtered_timeline['ActivePCs'] >= required_count])
+
+            if total_minutes == 0:
+                root.after(0, lambda: status_label.configure(text="⚠ No data to export."))
+                return
+
+            completed_minutes = 0
+
+            for month in all_months:
+                if cancel_flag.is_set(): return
+                month_start = month.to_timestamp()
+                month_end = (month_start + pd.offsets.MonthBegin(1))
+                month_str = str(month)
+
+                for site, (timeline, num_pcs) in site_timelines.items():
+                    if cancel_flag.is_set(): return
+
+                    filtered_timeline = timeline[(timeline.index >= month_start) & (timeline.index < month_end)]
+                    all_logins = df[(df['Site'] == site) &
+                                    (df['Login Time'] >= month_start) &
+                                    (df['Login Time'] < month_end)]
+                    unique_pcs = sorted(all_logins['Resource'].unique())
+
+                    for pct in thresholds:
+                        if cancel_flag.is_set(): return
+
+                        required_count = int(np.ceil((pct / 100) * num_pcs)) or 1
+                        filtered_minutes = filtered_timeline[filtered_timeline['ActivePCs'] >= required_count].index
+
+                        for minute in filtered_minutes:
+                            export_rows.append({
+                                'Branch': site,
+                                'Threshold (%)': pct,
+                                'Timestamp': minute,
+                                'PCs Used': f"{required_count} of {len(unique_pcs)}",
+                                'Month': month_str
+                            })
+                            completed_minutes += 1
+                            if completed_minutes % 100 == 0 or completed_minutes == total_minutes:
+                                progress_val = completed_minutes / total_minutes
+                                root.after(0, lambda v=progress_val: progress.set(v))
+                                root.after(0, lambda v=progress_val: label.configure(
+                                    text=f"Exporting... {int(v * 100)}%"))
+
+            if not cancel_flag.is_set():
+                pd.DataFrame(export_rows).to_excel(export_path, index=False)
+                root.after(0, lambda: status_label.configure(
+                    text=f"📤 Exported all-month plot data to: {export_path}"
+                ))
+
+        except Exception as e:
+            root.after(0, lambda: status_label.configure(text=f"❌ Export failed: {e}"))
+        finally:
+            if export_win.winfo_exists():
+                root.after(0, export_win.destroy)
+
+
+    threading.Thread(target=do_export, daemon=True).start()
+
+
 
 
 
@@ -291,7 +352,7 @@ def load_data(file_path, progress_widget, label_widget, cancelled):
                 progress_val = processed_rows / total_rows
                 root.after(0, lambda val=progress_val: progress_widget.set(val))
                 root.after(0, lambda val=progress_val: label_widget.configure(
-                    text=f"Loading data... {int(val * 100)}%"))
+                    text=f"Processing data... {int(val * 100)}%"))
 
         site_timelines[site] = (timeline, num_pcs)
 
@@ -328,7 +389,7 @@ plot_canvas.draw()
 status_label = ctk.CTkLabel(scrollable_frame, text="📂 Please load an Excel file to begin.", text_color="gray")
 status_label.pack(fill=ctk.X, padx=10, pady=(5, 10))
 
-load_btn = ctk.CTkButton(scrollable_frame, text="📂 Load Excel File", command=load_and_initialize)
+load_btn = ctk.CTkButton(scrollable_frame, text="Create New Analysis", command=load_and_initialize)
 load_btn.pack(pady=(0, 10))
 
 detail_container = ctk.CTkFrame(scrollable_frame, height=150)
@@ -361,15 +422,26 @@ site_dropdown = ttk.Combobox(left_frame, textvariable=site_var, state='readonly'
 site_dropdown.pack(side=ctk.LEFT)
 
 
-apply_btn = ctk.CTkButton(frame, text="✅ Apply", command=update_plot)
+apply_btn = ctk.CTkButton(
+    frame,
+    text="✅ Apply",
+    command=update_plot,
+    fg_color="green",       # This sets the button's fill color
+    hover_color="#006400"   # Optional: a darker green on hover
+)
 apply_btn.grid(row=0, column=2, padx=(20, 0), sticky='e')
 
 export_btn = ctk.CTkButton(frame, text="📤 Export for PowerBI", command=export_plot_data)
 export_btn.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
+
 percent_var = tk.IntVar()
 slider_frame = ctk.CTkFrame(frame)
 slider_frame.grid(row=0, column=1, padx=(20, 0), sticky='e')
+
+
+slider_label = ctk.CTkLabel(slider_frame, text="Select Threshold:", text_color="white", font=ctk.CTkFont(size=12))
+slider_label.pack(pady=(0, 5))
 
 percent_slider = ctk.CTkSlider(
     slider_frame,
