@@ -6,9 +6,12 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from datetime import datetime
 from collections import defaultdict
-import customtkinter as ctk
 import threading
-import time 
+import customtkinter as ctk
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+
 
 # Global state
 df = None
@@ -389,7 +392,7 @@ plot_canvas.draw()
 status_label = ctk.CTkLabel(scrollable_frame, text="📂 Please load an Excel file to begin.", text_color="gray")
 status_label.pack(fill=ctk.X, padx=10, pady=(5, 10))
 
-load_btn = ctk.CTkButton(scrollable_frame, text="Create New Analysis", command=load_and_initialize)
+load_btn = ctk.CTkButton(scrollable_frame, text="Import File", command=load_and_initialize)
 load_btn.pack(pady=(0, 10))
 
 detail_container = ctk.CTkFrame(scrollable_frame, height=150)
