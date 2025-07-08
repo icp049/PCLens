@@ -7,6 +7,8 @@ from tkinter import ttk, filedialog
 from datetime import datetime
 from collections import defaultdict
 import customtkinter as ctk
+import threading
+import time 
 
 # Global state
 df = None
@@ -172,84 +174,102 @@ def update_plot():
 
 
 def load_and_initialize():
-    loading_win = ctk.CTkToplevel(root)
-    loading_win.title("Loading...")
-    loading_win.geometry("300x100")
-    loading_win.transient(root)
-    loading_win.grab_set()
-    
-    label = ctk.CTkLabel(loading_win, text="Loading data, please wait...")
-    label.pack(pady=10)
-    
-    progress = ctk.CTkProgressBar(loading_win, mode="indeterminate")
-    progress.pack(fill="x", padx=20, pady=(0, 20))
-    progress.start()
-    loading_win.update()
-
     file_path = filedialog.askopenfilename(
         title="Select Excel File",
         filetypes=[("Excel files", "*.xlsx *.xls")]
     )
 
     if not file_path:
-        loading_win.destroy()
-        return
+        return  # Cancelled
 
-    try:
-        global df
-        df = pd.read_excel(file_path)
-        dt_format = '%m/%d/%Y %I:%M %p'
-        df['Login Time'] = pd.to_datetime(df['Login Time'], format=dt_format, errors='coerce')
-        df['Logout Time'] = pd.to_datetime(df['Logout Time'], format=dt_format, errors='coerce')
-        df['Resource'] = df['Resource'].astype(str).str.strip()
-        df['Site'] = df['Site'].astype(str).str.strip()
+    # Create loading window before thread starts
+    loading_win = ctk.CTkToplevel(root)
+    loading_win.title("Loading...")
+    loading_win.geometry("300x100")
+    loading_win.transient(root)
+    loading_win.grab_set()
 
-        df['Month'] = df['Login Time'].dt.to_period('M')
-        available_months = sorted(df['Month'].dropna().unique())
-        month_dropdown['values'] = [str(m) for m in available_months]
-        if available_months:
-            month_var.set(str(available_months[0]))
+    label = ctk.CTkLabel(loading_win, text="Processing Data... 0%")
+    label.pack(pady=10)
 
-        start = df['Login Time'].min().replace(day=1)
-        end = (df['Login Time'].max() + pd.Timedelta(days=1)).replace(day=1) + pd.offsets.MonthEnd(0)
-        full_range = pd.date_range(start=start, end=end, freq='min')
-        timeline_template = pd.DataFrame({'Timestamp': full_range})
-        timeline_template.set_index('Timestamp', inplace=True)
+    progress = ctk.CTkProgressBar(loading_win, mode="determinate")
+    progress.pack(fill="x", padx=20, pady=(0, 20))
+    progress.set(0)
 
-        global site_timelines
-        site_timelines.clear()
+    def do_load():
+        try:
+            load_data(file_path, progress, label)
+        finally:
+            loading_win.destroy()
 
-        for site in df['Site'].unique():
-            site_df = df[df['Site'] == site]
-            pcs = sorted(site_df['Resource'].unique())
-            num_pcs = len(pcs)
+    threading.Thread(target=do_load, daemon=True).start()
+    
+def load_data(file_path, progress_widget, label_widget):
+    global df, site_timelines
 
-            timeline = timeline_template.copy()
-            timeline['ActivePCs'] = 0
+    df = pd.read_excel(file_path)
+    dt_format = '%m/%d/%Y %I:%M %p'
+    df['Login Time'] = pd.to_datetime(df['Login Time'], format=dt_format, errors='coerce')
+    df['Logout Time'] = pd.to_datetime(df['Logout Time'], format=dt_format, errors='coerce')
+    df['Resource'] = df['Resource'].astype(str).str.strip()
+    df['Site'] = df['Site'].astype(str).str.strip()
 
-            for _, row in site_df.iterrows():
-                login, logout = row['Login Time'], row['Logout Time']
-                if pd.notna(login) and pd.notna(logout):
-                    active_minutes = pd.date_range(start=login, end=logout, freq='min')
-                    for minute in active_minutes:
-                        if minute in timeline.index:
-                            timeline.loc[minute, 'ActivePCs'] += 1
+    df['Month'] = df['Login Time'].dt.to_period('M')
+    available_months = sorted(df['Month'].dropna().unique())
 
-            site_timelines[site] = (timeline, num_pcs)
+    root.after(0, lambda: month_dropdown.configure(values=[str(m) for m in available_months]))
+    if available_months:
+        root.after(0, lambda: month_var.set(str(available_months[0])))
 
-    finally:
-        loading_win.destroy()
+    start = df['Login Time'].min().replace(day=1)
+    end = (df['Login Time'].max() + pd.Timedelta(days=1)).replace(day=1) + pd.offsets.MonthEnd(0)
+    full_range = pd.date_range(start=start, end=end, freq='min')
+    timeline_template = pd.DataFrame({'Timestamp': full_range})
+    timeline_template.set_index('Timestamp', inplace=True)
 
-    site_dropdown['values'] = sorted(df['Site'].unique())
-    if site_dropdown['values']:
-        site_var.set(site_dropdown['values'][0])
-        status_label.config(text="✔ File loaded. Ready to visualize data.")
+    site_timelines.clear()
+
+    # Setup progress tracking
+    total_rows = len(df)
+    processed_rows = 0
+
+    for site in df['Site'].unique():
+        site_df = df[df['Site'] == site]
+        pcs = sorted(site_df['Resource'].unique())
+        num_pcs = len(pcs)
+
+        timeline = timeline_template.copy()
+        timeline['ActivePCs'] = 0
+
+        for _, row in site_df.iterrows():
+            login, logout = row['Login Time'], row['Logout Time']
+            if pd.notna(login) and pd.notna(logout):
+                active_minutes = pd.date_range(start=login, end=logout, freq='min')
+                for minute in active_minutes:
+                    if minute in timeline.index:
+                        timeline.loc[minute, 'ActivePCs'] += 1
+
+            processed_rows += 1
+            if processed_rows % 50 == 0 or processed_rows == total_rows:
+                progress_val = processed_rows / total_rows
+                root.after(0, lambda val=progress_val: progress_widget.set(val))
+                root.after(0, lambda val=progress_val: label_widget.configure(
+                    text=f"Loading data... {int(val * 100)}%"))
+
+        site_timelines[site] = (timeline, num_pcs)
+
+    # Final GUI updates
+    root.after(0, lambda: site_dropdown.configure(values=sorted(df['Site'].unique())))
+    if df['Site'].nunique() > 0:
+        root.after(0, lambda: site_var.set(sorted(df['Site'].unique())[0]))
+    root.after(0, lambda: status_label.configure(text="✔ File loaded. Ready to visualize data."))
+
 
 # ---------------- TKINTER UI ----------------
 root = ctk.CTk()
 root.title("PC Activity Visualizer (Monthly)")
-root.state('zoomed')
-root.minsize(1024, 768)
+root.geometry("1000x1000")
+root.minsize(1000, 1000)
 
 scrollable_frame = ctk.CTkScrollableFrame(root)
 scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -270,6 +290,9 @@ plot_canvas.draw()
 
 status_label = ctk.CTkLabel(scrollable_frame, text="📂 Please load an Excel file to begin.", text_color="gray")
 status_label.pack(fill=ctk.X, padx=10, pady=(5, 10))
+
+load_btn = ctk.CTkButton(scrollable_frame, text="📂 Load Excel File", command=load_and_initialize)
+load_btn.pack(pady=(0, 10))
 
 detail_container = ctk.CTkFrame(scrollable_frame, height=150)
 detail_container.pack(fill=ctk.X, padx=10, pady=(0, 10))
@@ -304,7 +327,7 @@ site_dropdown.pack(side=ctk.LEFT)
 apply_btn = ctk.CTkButton(frame, text="✅ Apply", command=update_plot)
 apply_btn.grid(row=0, column=2, padx=(20, 0), sticky='e')
 
-export_btn = ctk.CTkButton(frame, text="📤 Export Contribution Summary to Excel", command=export_plot_data)
+export_btn = ctk.CTkButton(frame, text="📤 Export for PowerBI", command=export_plot_data)
 export_btn.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
 percent_var = tk.IntVar()
@@ -322,7 +345,6 @@ percent_slider = tk.Scale(
 percent_slider.set(100)
 percent_slider.grid(row=0, column=1, sticky='e', padx=(20, 0))
 
-load_btn = ctk.CTkButton(frame, text="📂 Load Excel File", command=load_and_initialize)
-load_btn.grid(row=1, column=2, padx=(20, 0), sticky='e')
+
 
 root.mainloop()
