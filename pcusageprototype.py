@@ -365,7 +365,7 @@ def load_data(file_path, progress_widget, label_widget, cancelled):
 
 # ---------------- TKINTER UI ----------------
 root = ctk.CTk()
-root.title("PC Activity Visualizer (Monthly)")
+root.title("PC Usage Visualizer")
 root.geometry("1000x1000")
 root.minsize(1000, 1000)
 
