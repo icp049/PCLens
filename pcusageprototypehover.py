@@ -10,7 +10,7 @@ import threading
 import customtkinter as ctk
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
-
+from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 
 
 # Global state
@@ -462,6 +462,13 @@ plot_canvas = FigureCanvasTkAgg(fig, master=plot_frame)
 fig.canvas.mpl_connect('motion_notify_event', on_hover)
 canvas_widget = plot_canvas.get_tk_widget()
 canvas_widget.pack()
+
+#toolbar for zoom 
+toolbar = NavigationToolbar2Tk(plot_canvas, plot_frame)
+toolbar.update()
+toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+
 canvas_widget.config(width=1200, height=600)
 
 ax.clear()
