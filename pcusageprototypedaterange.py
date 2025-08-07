@@ -22,6 +22,7 @@ site_timelines = {}
 scatter = None
 filtered_data_for_hover = None
 annotation = None 
+monthly_site_pcs = defaultdict(lambda: defaultdict(set))
 
 def export_plot_data():
     if not site_timelines:
