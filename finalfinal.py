@@ -216,7 +216,10 @@ def update_plot():
 
     if filtered.empty:
             status_label.configure(text="⚠ No data to show for selected range.")
-            status_detail_label.configure(text="\n".join(month_info))
+            status_detail_text.configure(state="normal")
+            status_detail_text.delete("1.0", "end")
+            status_detail_text.insert("end", "\n".join(month_info))
+            status_detail_text.configure(state="disabled")
             return
     
     if not site or site not in site_timelines:
@@ -357,12 +360,51 @@ def update_plot():
     time_block = "\n\n🕒 Qualified Time Ranges (≥{}% PCs active):\n".format(pct_required)
     time_block += "\n".join(range_lines)
 
-    status_detail_label.configure(
-        text="🖥 Monthly PC counts in selected range:\n" + "\n".join(month_info) +
-            ("\n\n" + "\n".join(change_notes) if change_notes else "") +
-            "\n\n🕒 Qualified Time Ranges (≥{}% PCs active, relative to each month):\n".format(pct_required) +
-            "\n".join(range_lines)
-    )
+    # ---------- Build Table ----------
+    table_lines = []
+    table_lines.append(f"{'Month':<12} {'PCs':>5} {f'Required PCs at {pct_required}%':>20}")
+    for m in month_range:
+        pcs_count = len(monthly_site_pcs.get(site, {}).get(m, set()))
+        if pcs_count == 0:
+            continue
+        req_count = int(np.ceil((pct_required / 100) * pcs_count)) or 1
+        table_lines.append(f"{m.strftime('%b %Y'):<12} {pcs_count:>5} {req_count:>20}")
+
+    # ---------- Build Sections ----------
+    sections = []
+    sections.append("📊 Monthly PC Counts & Thresholds")
+    sections.append("```")  # block style for alignment
+    sections.extend(table_lines)
+    sections.append("```")
+
+    if change_notes:
+        sections.append("\n🔄 Changes in PC Counts")
+        for note in change_notes:
+            if "added" in note:
+                sections.append(f"  ✅ {note}")
+            elif "removed" in note:
+                sections.append(f"  ❌ {note}")
+            else:
+                sections.append(f"  ⚠ {note}")
+
+    sections.append(f"\n🕒 Qualified Time Ranges (≥{pct_required}% PCs active)")
+    if ranges:
+        for s, e in ranges[:50]:
+            if s.date() == e.date():
+                sections.append(f"  • {s.strftime('%Y-%m-%d %H:%M')} → {e.strftime('%H:%M')}")
+            else:
+                sections.append(f"  • {s.strftime('%Y-%m-%d %H:%M')} → {e.strftime('%Y-%m-%d %H:%M')}")
+        if len(ranges) > 50:
+            sections.append(f"  ...and {len(ranges) - 50} more.")
+    else:
+        sections.append("  ⚠ No qualified time ranges found.")
+
+    # ---------- Update Label or Textbox ----------
+    status_detail_text.configure(state="normal")
+    status_detail_text.delete("1.0", "end")
+    status_detail_text.insert("end", "\n".join(sections))
+    status_detail_text.configure(state="disabled")
+
 
     status_label.configure(text="✔ Plot updated.")
 
@@ -471,7 +513,9 @@ def reset_ui():
     start_date_var.set("")
     end_date_var.set("")
     site_var.set("")
-    status_detail_label.configure(text="")
+    status_detail_text.configure(state="normal")
+    status_detail_text.delete("1.0", "end")
+    status_detail_text.configure(state="disabled")
     ax.clear()
     ax.axis('off')
     plot_canvas.draw()
@@ -602,11 +646,9 @@ detail_container = ctk.CTkFrame(scrollable_frame, height=150)
 detail_container.pack(fill=ctk.X, padx=10, pady=(0, 10))
 detail_container.pack_propagate(False)
 
-status_detail_scroll = ctk.CTkScrollableFrame(detail_container)
-status_detail_scroll.pack(fill=ctk.BOTH, expand=True)
-
-status_detail_label = ctk.CTkLabel(status_detail_scroll, text="", text_color="white", justify="left", anchor="w")
-status_detail_label.pack(fill=ctk.X, padx=10, pady=10)
+status_detail_text = ctk.CTkTextbox(detail_container, wrap="none", font=("Courier New", 14))
+status_detail_text.pack(fill="both", expand=True, padx=10, pady=10)
+status_detail_text.configure(state="disabled")
 
 frame = ctk.CTkFrame(scrollable_frame)
 frame.pack(side=ctk.TOP, fill=ctk.X, padx=10, pady=10)
