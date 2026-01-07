@@ -151,6 +151,8 @@ annotation = None
 details_popout_win = None
 details_popout_text = None
 
+export_pending_after_load = False
+
 
 def open_details_popout():
     global details_popout_win, details_popout_text
@@ -172,11 +174,28 @@ def open_details_popout():
     except Exception:
         pass
 
-    # Top bar (optional)
-    top = ctk.CTkFrame(details_popout_win)
-    top.pack(fill="x", padx=10, pady=10)
+    # --- Mirror the same "Details" card look ---
+    detail_container = ctk.CTkFrame(details_popout_win, corner_radius=16)
+    detail_container.pack(fill="both", expand=True, padx=10, pady=10)
 
-    ctk.CTkLabel(top, text="Details (Pop Out)").pack(side="left")
+    # Header bar
+    detail_header = ctk.CTkFrame(detail_container, fg_color="transparent")
+    detail_header.pack(fill="x", padx=14, pady=(12, 6))
+
+    details_title = ctk.CTkLabel(
+        detail_header,
+        text="Details",
+        font=ctk.CTkFont(size=16, weight="bold"),
+    )
+    details_title.pack(side="left")
+
+    details_subtitle = ctk.CTkLabel(
+        detail_header,
+        text="(Pop Out)",
+        text_color="#9aa0a6",
+        font=ctk.CTkFont(size=12),
+    )
+    details_subtitle.pack(side="left", padx=(12, 0))
 
     def refresh_popout():
         if details_popout_text is None or not details_popout_text.winfo_exists():
@@ -187,10 +206,29 @@ def open_details_popout():
         details_popout_text.insert("end", content)
         details_popout_text.configure(state="disabled")
 
-    ctk.CTkButton(top, text="🔄 Refresh", width=110, command=refresh_popout).pack(side="right", padx=(10, 0))
+    def copy_popout():
+        try:
+            txt = status_detail_text.get("1.0", "end-1c")
+            details_popout_win.clipboard_clear()
+            details_popout_win.clipboard_append(txt)
+        except Exception:
+            pass
 
-    details_popout_text = ctk.CTkTextbox(details_popout_win, wrap="none", font=("Courier New", 14))
-    details_popout_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    ctk.CTkButton(detail_header, text="📋 Copy", width=90, command=copy_popout).pack(side="right", padx=(8, 0))
+    ctk.CTkButton(detail_header, text="🔄 Refresh", width=110, command=refresh_popout).pack(side="right")
+
+    # Separator line
+    sep = ctk.CTkFrame(detail_container, height=1, fg_color="#2a2a2a")
+    sep.pack(fill="x", padx=14, pady=(0, 10))
+
+    # Text area (match your Details textbox)
+    details_popout_text = ctk.CTkTextbox(
+        detail_container,
+        wrap="word",
+        font=("Segoe UI", 12),
+        corner_radius=12,
+    )
+    details_popout_text.pack(fill="both", expand=True, padx=14, pady=(0, 14))
     details_popout_text.configure(state="disabled")
 
     # Fill it once immediately
@@ -219,11 +257,15 @@ def export_plot_data():
     all_months = sorted(df["Login Time"].dt.to_period("M").dropna().unique())
 
     # ✅ Prompt file path only once here
-    export_path = filedialog.asksaveasfilename(
-        defaultextension=".xlsx",
-        filetypes=[("Excel files", "*.xlsx")],
-        title="Save Threshold Plot Data",
-    )
+    # export_path = filedialog.asksaveasfilename(
+    #     defaultextension=".xlsx",
+    #     filetypes=[("Excel files", "*.xlsx")],
+    #     title="Save Threshold Plot Data",
+    # )
+    export_path = os.path.join(get_app_dir(), "exports")
+    os.makedirs(export_path, exist_ok=True)
+    export_path = os.path.join(export_path, f"powerbi_export_{load_config().get('last_hash','unknown')}.xlsx")
+
 
     if not export_path:
         root.after(0, lambda:status_label.configure(text="❌ Export canceled."))
@@ -773,6 +815,10 @@ def load_current_file():
 
             if ok:
                 root.after(0, init_ui_from_df)
+                global export_pending_after_load
+                if export_pending_after_load:
+                    export_pending_after_load = False
+                    root.after(0, export_plot_data)
                 root.after(0, lambda: status_label.configure(text="⚡ Loaded saved file from cache."))
                 cfg = load_config()
                 cfg["current_file"] = current_path
@@ -914,6 +960,7 @@ def load_processed_cache(file_hash: str) -> bool:
 
 
 def load_and_initialize():
+    global export_pending_after_load
     original_path = filedialog.askopenfilename(
         title="Select Excel File", filetypes=[("Excel files", "*.xlsx *.xls")]
     )
@@ -926,6 +973,8 @@ def load_and_initialize():
         cfg["current_file"] = current_path
         cfg.pop("last_hash", None)  # force re-check
         save_config(cfg)
+        
+        export_pending_after_load = True
     except Exception as e:
         root.after(0, lambda:status_label.configure(text=f"❌ Import failed: {e}"))
         return
@@ -1156,6 +1205,13 @@ def load_data(file_path, progress_widget, label_widget, cancelled):
         root.after(0, lambda: site_var.set(sorted(df["Location"].unique())[0]))
 
     try:
+        global export_pending_after_load
+
+    # ✅ Export once after a NEW import, before caching
+        if export_pending_after_load:
+            export_pending_after_load = False
+            root.after(0, export_plot_data)
+            
         file_hash = sha256_file(file_path)
         save_processed_cache(file_hash)
 
@@ -1238,28 +1294,55 @@ load_btn = ctk.CTkButton(
 )
 load_btn.pack(pady=(0, 10))
 
-detail_container = ctk.CTkFrame(scrollable_frame, height=150)
+detail_container = ctk.CTkFrame(scrollable_frame, corner_radius=16)
 detail_container.pack(fill=ctk.X, padx=10, pady=(0, 10))
-detail_container.pack_propagate(False)
 
-
+# Header bar
 detail_header = ctk.CTkFrame(detail_container, fg_color="transparent")
-detail_header.pack(fill="x", padx=10, pady=(8, 0))
+detail_header.pack(fill="x", padx=14, pady=(12, 6))
 
-ctk.CTkLabel(detail_header, text="Details").pack(side="left")
-
-ctk.CTkButton(
+details_title = ctk.CTkLabel(
     detail_header,
-    text="⤢ Pop Out",
-    width=90,
-    command=open_details_popout
-).pack(side="right")
-
-status_detail_text = ctk.CTkTextbox(
-    detail_container, wrap="none", font=("Courier New", 14)
+    text="Details",
+    font=ctk.CTkFont(size=16, weight="bold"),
 )
-status_detail_text.pack(fill="both", expand=True, padx=10, pady=(8, 10))
+details_title.pack(side="left")
+
+details_subtitle = ctk.CTkLabel(
+    detail_header,
+    text="",
+    text_color="#9aa0a6",
+    font=ctk.CTkFont(size=12),
+)
+details_subtitle.pack(side="left", padx=(12, 0))
+
+def copy_details():
+    try:
+        txt = status_detail_text.get("1.0", "end-1c")
+        root.clipboard_clear()
+        root.clipboard_append(txt)
+        status_label.configure(text="📋 Details copied to clipboard.")
+    except Exception:
+        pass
+
+ctk.CTkButton(detail_header, text="📋 Copy", width=90, command=copy_details).pack(side="right", padx=(8, 0))
+ctk.CTkButton(detail_header, text="⤢ Pop Out", width=100, command=open_details_popout).pack(side="right")
+
+# Separator line
+sep = ctk.CTkFrame(detail_container, height=1, fg_color="#2a2a2a")
+sep.pack(fill="x", padx=14, pady=(0, 10))
+
+# Text area (modern)
+status_detail_text = ctk.CTkTextbox(
+    detail_container,
+    wrap="word",
+    font=("Segoe UI", 12),
+    corner_radius=12,
+    height=220,
+)
+status_detail_text.pack(fill="both", expand=True, padx=14, pady=(0, 14))
 status_detail_text.configure(state="disabled")
+
 
 
 
@@ -1313,10 +1396,10 @@ apply_btn = ctk.CTkButton(
 )
 apply_btn.grid(row=0, column=2, padx=(20, 0), sticky="e")
 
-export_btn = ctk.CTkButton(
-    frame, text="📤 Export for PowerBI", command=export_plot_data
-)
-export_btn.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+# export_btn = ctk.CTkButton(
+#     frame, text="📤 Export for PowerBI", command=export_plot_data
+# )
+# export_btn.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
 
 percent_var = tk.IntVar()
