@@ -1532,7 +1532,7 @@ for idx, i in enumerate(range(10, 101, 10)):
     lbl.grid(row=0, column=idx, sticky="n")
 
 
-# --- Min continuous minutes dropdown ---
+
 ctk.CTkLabel(
     slider_frame,
     text="Min Continuous Minutes:",
@@ -1540,24 +1540,39 @@ ctk.CTkLabel(
     font=ctk.CTkFont(size=12),
 ).pack(pady=(10, 5))
 
-min_run_dropdown = ttk.Combobox(
+ALLOWED_MIN_RUNS = [5, 10, 15, 20, 30, 40, 50, 60]
+
+def _snap_min_run(v):
+    v = int(v)
+    snapped = min(ALLOWED_MIN_RUNS, key=lambda x: abs(x - v))
+    min_run_var.set(snapped)
+
+# --- Min continuous minutes slider ---
+min_run_slider = ctk.CTkSlider(
     slider_frame,
-    state="readonly",
-    values=[5, 10, 15, 20],
-    width=8,
+    from_=min(ALLOWED_MIN_RUNS),
+    to=max(ALLOWED_MIN_RUNS),
+    number_of_steps=len(ALLOWED_MIN_RUNS) - 1,
+    variable=min_run_var,
+    command=_snap_min_run,
 )
-min_run_dropdown.set("5")
+min_run_slider.set(5)
+min_run_slider.pack(fill="x")
+
+# Tick labels
+min_tick_frame = ctk.CTkFrame(slider_frame)
+min_tick_frame.pack(fill="x", pady=(2, 0))
+min_tick_frame.grid_columnconfigure(tuple(range(len(ALLOWED_MIN_RUNS))), weight=1)
+
+for idx, val in enumerate(ALLOWED_MIN_RUNS):
+    ctk.CTkLabel(
+        min_tick_frame,
+        text=str(val),
+        text_color="white",
+        font=ctk.CTkFont(size=10),
+    ).grid(row=0, column=idx)
 
 
-def _on_min_run_change(event=None):
-    try:
-        min_run_var.set(int(min_run_dropdown.get()))
-    except Exception:
-        min_run_var.set(5)
-
-
-min_run_dropdown.bind("<<ComboboxSelected>>", _on_min_run_change)
-min_run_dropdown.pack()
 
 
 load_current_file()
